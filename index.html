@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Google Sheet Viewer + LLM Query</title>
+  <style>
+    body { font-family: Arial; margin:20px; }
+    table { border-collapse: collapse; width:100%; margin-top:10px; }
+    th, td { border:1px solid #ddd; padding:8px; }
+    th { background:#f2f2f2; }
+    button { margin:5px; padding:8px 12px; }
+    #modify-msg, #answer-box { margin-top:10px; color:green; }
+    #add-form label, #delete-form label { display:block; margin:4px 0 2px; }
+    #add-form input, #delete-form input { width:100%; padding:6px; }
+    #query-input { width:80%; padding:6px; margin-right:4px; }
+    pre { background:#f9f9f9; padding:10px; }
+  </style>
+</head>
+<body>
+  <h1>Google Sheet Viewer + LLM Query</h1>
+
+  <!-- Data Table -->
+  <button id="load-btn">Load Data</button>
+  <div id="table-container"></div>
+  <hr/>
+
+  <!-- LLM Query -->
+  <h2>Ask the Sheet</h2>
+  <input id="query-input" placeholder="Enter question…"/>
+  <button id="run-query">Run Query</button>
+  <pre id="answer-box"></pre>
+  <hr/>
+
+  <!-- Modify Sheet -->
+  <h2>Modify Sheet</h2>
+  <button id="btn-add">Add Row</button>
+  <button id="btn-delete">Delete Row</button>
+  <div id="modify-msg"></div>
+
+  <div id="add-form" style="display:none; margin-top:10px;">
+    <h3>New Row</h3>
+    <form id="row-form"></form>
+    <button id="save-row" type="button">Save Row</button>
+  </div>
+
+  <div id="delete-form" style="display:none; margin-top:10px;">
+    <h3>Delete Row</h3>
+    <label>student_id:</label>
+    <input id="delete-key"/><br/>
+    <button id="confirm-delete" type="button">Confirm Delete</button>
+  </div>
+
+  <script>
+  (function() {
+    let headers = [];
+
+    async function fetchData() {
+      const cont = document.getElementById('table-container');
+      cont.innerText = 'Loading…';
+      try {
+        const res = await fetch('/data');
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        cont.innerHTML = '';
+        if (!data.length) return cont.innerText = 'No data.';
+        headers = Object.keys(data[0]);
+        const tbl = document.createElement('table');
+        const hrow = tbl.insertRow();
+        headers.forEach(c => {
+          const th = document.createElement('th'); th.innerText = c;
+          hrow.appendChild(th);
+        });
+        data.forEach(r => {
+          const row = tbl.insertRow();
+          headers.forEach(c => {
+            const cell = row.insertCell();
+            cell.innerText = r[c] == null ? '' : r[c];
+          });
+        });
+        cont.appendChild(tbl);
+      } catch (e) {
+        console.error(e);
+        cont.innerText = 'Error loading data: ' + e.message;
+      }
+    }
+
+    async function runQuery() {
+      const q = document.getElementById('query-input').value.trim();
+      if (!q) return alert('Please enter a question.');
+      const box = document.getElementById('answer-box');
+      box.innerText = 'Thinking…';
+      try {
+        const res = await fetch('/query?q=' + encodeURIComponent(q));
+        if (!res.ok) throw new Error(await res.text());
+        const js = await res.json();
+        if (js.result) {
+          box.innerText = JSON.stringify(js.result, null, 2);
+        } else {
+          box.innerText = js.answer || js.error;
+        }
+      } catch (err) {
+        console.error(err);
+        box.innerText = 'Query error: ' + err.message;
+      }
+    }
+
+    document.getElementById('load-btn').onclick  = fetchData;
+    document.getElementById('run-query').onclick = runQuery;
+
+    // Add Row
+    document.getElementById('btn-add').onclick = () => {
+      document.getElementById('modify-msg').innerText = '';
+      document.getElementById('delete-form').style.display = 'none';
+      const form = document.getElementById('row-form');
+      form.innerHTML = '';
+      headers.forEach(c => {
+        form.insertAdjacentHTML('beforeend',
+          `<label>${c}</label><input name="${c}"/>`
+        );
+      });
+      document.getElementById('add-form').style.display = 'block';
+    };
+    document.getElementById('save-row').onclick = async () => {
+      const fd = new FormData(document.getElementById('row-form'));
+      const obj = {};
+      headers.forEach(c => obj[c] = fd.get(c) || '');
+      try {
+        const res = await fetch('/add?' + new URLSearchParams(obj));
+        if (!res.ok) throw new Error(await res.text());
+        document.getElementById('modify-msg').innerText = 'Row added!';
+        document.getElementById('add-form').style.display = 'none';
+        fetchData();
+      } catch (err) {
+        alert('Add failed: ' + err.message);
+      }
+    };
+
+    // Delete Row
+    document.getElementById('btn-delete').onclick = () => {
+      document.getElementById('modify-msg').innerText = '';
+      document.getElementById('add-form').style.display = 'none';
+      document.getElementById('delete-key').value = '';
+      document.getElementById('delete-form').style.display = 'block';
+    };
+    document.getElementById('confirm-delete').onclick = async () => {
+      const key = document.getElementById('delete-key').value.trim();
+      if (!key) return alert('Please enter a student_id');
+      try {
+        const res = await fetch('/delete?key=' + encodeURIComponent(key));
+        if (!res.ok) throw new Error(await res.text());
+        const js = await res.json();
+        document.getElementById('modify-msg').innerText =
+          'Deleted rows: ' + (js.rows_deleted || 0);
+        document.getElementById('delete-form').style.display = 'none';
+        fetchData();
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
+      }
+    };
+
+    window.addEventListener('DOMContentLoaded', fetchData);
+  })();
+  </script>
+</body>
+</html>

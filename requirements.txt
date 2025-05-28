@@ -1,0 +1,9 @@
+Flask
+flask-cors
+python-dotenv
+gspread
+oauth2client
+pandas
+pandasql
+openai
+mcp-server
